@@ -1,4 +1,7 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using TutorialProjectAPI.Contexts;
+using TutorialProjectAPI.Dtos;
 using TutorialProjectAPI.Models;
 using TutorialProjectAPI.Repositories;
 
@@ -10,31 +13,22 @@ namespace TutorialProjectAPI.Controllers
     {
         private readonly IIdentifiableRepository<PostDB> _posts;
         private readonly IIdentifiableRepository<ReplyDB> _replies;
+        private readonly MainContext _context;
+
+        private const long PostAttachmentLimit = 2_000_000;   // 2 MB
 
         public PostsController(IIdentifiableRepository<PostDB> posts,
-                               IIdentifiableRepository<ReplyDB> replies)
+                               IIdentifiableRepository<ReplyDB> replies,
+                               MainContext context)
         {
             _posts = posts;
             _replies = replies;
+            _context = context;
         }
 
-        // ───────────────────────────────────────────────────────────────────
-        // GET: api/posts
-        [HttpGet]
-        public async Task<IActionResult> GetAll() =>
-            Ok(await _posts.GetAllAsync());
+        // ────────────── CRUD ──────────────
 
-        // ───────────────────────────────────────────────────────────────────
-        // GET: api/posts/{id}
-        [HttpGet("{id}")]
-        public async Task<IActionResult> Get(Guid id)
-        {
-            var post = await _posts.GetByIdAsync(id);
-            return post is null ? NotFound() : Ok(post);
-        }
-
-        // ───────────────────────────────────────────────────────────────────
-        // POST: api/posts               (single post, optional replies)
+        // POST  api/Posts           (single post, optional replies)
         [HttpPost]
         public async Task<IActionResult> Create(PostCreateDto dto)
         {
@@ -42,60 +36,40 @@ namespace TutorialProjectAPI.Controllers
             {
                 Id = Guid.NewGuid(),
                 UserId = dto.UserId,
-                Body = dto.Body
-            };
-
-            if (dto.Replies?.Any() == true)
-            {
-                post.Replies = dto.Replies.Select(r => new ReplyDB
+                Body = dto.Body,
+                Replies = dto.Replies?.Select(r => new ReplyDB
                 {
                     Id = Guid.NewGuid(),
                     Body = r.Body,
                     UserId = r.UserId,
-                    PostId = post.Id
-                }).ToList();
-            }
+                    PostId = Guid.Empty   // fixed below
+                }).ToList() ?? new List<ReplyDB>()
+            };
+
+            // set PostId on each reply
+            foreach (var reply in post.Replies)
+                reply.PostId = post.Id;
 
             await _posts.AddAsync(post);
             await _posts.SaveAsync();
-
-            return CreatedAtAction(nameof(Get), new { id = post.Id }, post);
+            return CreatedAtAction(nameof(GetById), new { id = post.Id }, post);
         }
 
-        // ───────────────────────────────────────────────────────────────────
-        // POST: api/posts/bulk          (array of posts with nested replies)
-        [HttpPost("bulk")]
-        public async Task<IActionResult> BulkCreate(List<PostCreateDto> list)
+        // GET  api/Posts
+        [HttpGet]
+        public async Task<IActionResult> GetAll() =>
+            Ok(await _posts.GetAllAsync());
+
+        // GET  api/Posts/{id}
+        [HttpGet("{id:guid}")]
+        public async Task<IActionResult> GetById(Guid id)
         {
-            foreach (var dto in list)
-            {
-                var p = new PostDB
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = dto.UserId,
-                    Body = dto.Body,
-                    Replies = dto.Replies?.Select(r => new ReplyDB
-                    {
-                        Id = Guid.NewGuid(),
-                        Body = r.Body,
-                        UserId = r.UserId
-                    }).ToList() ?? new List<ReplyDB>()
-                };
-
-                // ensure PostId is set on each reply
-                foreach (var reply in p.Replies)
-                    reply.PostId = p.Id;
-
-                await _posts.AddAsync(p);
-            }
-
-            await _posts.SaveAsync();
-            return Ok();
+            var post = await _posts.GetByIdAsync(id);
+            return post is null ? NotFound() : Ok(post);
         }
 
-        // ───────────────────────────────────────────────────────────────────
-        // PUT: api/posts/{id}
-        [HttpPut("{id}")]
+        // PUT  api/Posts/{id}
+        [HttpPut("{id:guid}")]
         public async Task<IActionResult> Update(Guid id, PostCreateDto dto)
         {
             var post = await _posts.GetByIdAsync(id);
@@ -106,9 +80,8 @@ namespace TutorialProjectAPI.Controllers
             return NoContent();
         }
 
-        // ───────────────────────────────────────────────────────────────────
-        // DELETE: api/posts/{id}
-        [HttpDelete("{id}")]
+        // DELETE  api/Posts/{id}
+        [HttpDelete("{id:guid}")]
         public async Task<IActionResult> Delete(Guid id)
         {
             var post = await _posts.GetByIdAsync(id);
@@ -117,6 +90,40 @@ namespace TutorialProjectAPI.Controllers
             _posts.Delete(post);
             await _posts.SaveAsync();
             return NoContent();
+        }
+
+        // ────────────── Attachment upload ──────────────
+
+        // PUT  api/Posts/{postId}/attachment
+        [HttpPut("{postId:guid}/attachment")]
+        [RequestSizeLimit(PostAttachmentLimit)]
+        public async Task<IActionResult> UploadAttachment(
+            Guid postId,
+            [FromForm] PostAttachmentUploadDto dto)
+        {
+            if (dto.File == null || dto.File.Length == 0)
+                return BadRequest("No file supplied.");
+
+            if (dto.File.Length > PostAttachmentLimit)
+                return BadRequest("Attachment exceeds 2 MB.");
+
+            var post = await _posts.GetByIdAsync(postId);
+            if (post is null) return NotFound();
+
+            await using var ms = new MemoryStream();
+            await dto.File.CopyToAsync(ms);
+
+            var img = new ImageDB
+            {
+                Id = Guid.NewGuid(),
+                Data = ms.ToArray(),
+                ContentType = dto.File.ContentType,
+                Size = dto.File.Length
+            };
+
+            post.Attachment = img;
+            await _posts.SaveAsync();
+            return Ok(new ImageMetaDto(img.Id, img.ContentType, img.Size));
         }
     }
 }

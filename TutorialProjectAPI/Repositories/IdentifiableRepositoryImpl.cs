@@ -17,6 +17,12 @@ namespace TutorialProjectAPI.Repositories
 
         public async Task<IEnumerable<T>> GetAllAsync() => await _dbSet.ToListAsync();
 
+        public async Task<T?> GetByIdAsync(Guid id, bool track = false)
+        {
+            var query = _context.Set<T>().Where(e => EF.Property<Guid>(e, "Id") == id);
+            if (!track) query = query.AsNoTracking();
+            return await query.FirstOrDefaultAsync();
+        }
         public async Task<T?> GetByIdAsync(Guid id) => await _dbSet.FindAsync(id);
 
         public async Task AddAsync(T entity) => await _dbSet.AddAsync(entity);

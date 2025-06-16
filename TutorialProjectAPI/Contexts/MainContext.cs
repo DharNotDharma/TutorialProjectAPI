@@ -11,6 +11,7 @@ namespace TutorialProjectAPI.Contexts          // <- must match all `using ...Co
         public DbSet<PostDB> Posts { get; set; }
         public DbSet<ReplyDB> Replies { get; set; }
 
+        public DbSet<ImageDB> Images { get; set; }
         protected override void OnModelCreating(ModelBuilder b)
         {
             base.OnModelCreating(b);

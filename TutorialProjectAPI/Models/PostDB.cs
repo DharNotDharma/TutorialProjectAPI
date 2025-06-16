@@ -13,6 +13,10 @@ namespace TutorialProjectAPI.Models
         public Guid UserId { get; set; }
         public UserDB? User { get; set; }       // <- add this
 
-        public ICollection<ReplyDB> Replies { get; set; } = new List<ReplyDB>();
+        public Guid? AttachmentId { get; set; }
+        public ImageDB Attachment { get; set; }
+
+        public List<ReplyDB> Replies { get; set; } = new();
+        
     }
 }
