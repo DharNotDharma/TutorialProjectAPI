@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using TutorialProjectAPI.Contexts;
 using TutorialProjectAPI.Models;
+using TutorialProjectAPI.Repositories;
 
 namespace TutorialProjectAPI.Controllers;
 
@@ -8,23 +9,22 @@ namespace TutorialProjectAPI.Controllers;
 [Route("api/[controller]")]
 public class ImagesController : ControllerBase
 {
-    private readonly MainContext _db;
-    private readonly long _avatarLimit;
-    private readonly long _postLimit;
+    private readonly IIdentifiableRepository<ImageDB> _imagesRepo;
 
-    public ImagesController(MainContext db, IConfiguration cfg)
+    public ImagesController(IIdentifiableRepository<ImageDB> imagesRepo)
     {
-        _db = db;
-        _avatarLimit = cfg.GetValue<long>("ImageLimits:AvatarBytes");
-        _postLimit = cfg.GetValue<long>("ImageLimits:PostBytes");
+        _imagesRepo = imagesRepo;
     }
 
-    // GET api/images/{id}
+    // GET api/Images/{id}
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Get(Guid id)
     {
-        var img = await _db.Images.FindAsync(id);
+        // no tracking needed for read-only streaming
+        var img = await _imagesRepo.GetByIdAsync(id);   // ← repo, not _db
+
         if (img is null) return NotFound();
+
         return File(img.Data, img.ContentType);
     }
 }
